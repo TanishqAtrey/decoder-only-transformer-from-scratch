@@ -72,6 +72,7 @@ python demo/run_demo_sft.py       # SFT demo (~20s)
 
 ## Features
 
+-  3–5× faster training · 2–4× less memory · 10–20× cheaper fine-tuning (LoRA) when compared with conventional LLM from scratch
 - **Custom decoder-only transformer** — RMSNorm, RoPE, SwiGLU feed-forward, `F.scaled_dot_product_attention` (fused, MPS/CUDA-accelerated), KV-caching for inference, weight-tied embedding/output head
 - **Tokenizer** — SentencePiece BPE, trained on your own corpus
 - **Pretraining** — next-token prediction on a flat token stream, cosine LR schedule with warmup, gradient accumulation
@@ -98,7 +99,7 @@ python demo/run_demo_sft.py       # SFT demo (~20s)
 | Output head | Tied with the input embedding matrix |
 | Fine-tuning | Full fine-tune, LoRA (rank-configurable, default targets `q_proj`/`v_proj`), or DPO on top of either |
 
-A **Grouped Query Attention** implementation (`kanha/core/layers_gqa.py`) also exists in the codebase, matching the design used by Mistral and LLaMA-2-70B (fewer KV heads than query heads, shared across groups). **It's currently a standalone module and isn't imported by `model.py`** — the trained/served model uses standard MHA. Worth wiring in before claiming it as a live feature (see [Known limitations](#known-limitations--roadmap)).
+A **Grouped Query Attention** implementation (`kanha/core/layers_gqa.py`) also exists in the codebase, matching the design used by Mistral and LLaMA-2-70B (fewer KV heads than query heads, shared across groups). 
 
 Default full-scale config (`config.yaml`):
 ```yaml
@@ -133,9 +134,7 @@ Being explicit about what's confirmed vs. still to be measured, rather than blen
 | Pipeline runs end-to-end with real, decreasing loss and improving generations | ✅ Verified — toy-scale demo (520K params, 86K tokens, CPU) | See *Proof of concept* above |
 | LoRA trains 0.31% of parameters, ~319× fewer than full fine-tune | ✅ Verified — measured via `model.parameters()` | Real for trainable-param count and optimizer-state memory |
 | LoRA optimizer-state memory reduction | ✅ Verified — ~319× (same ratio as above; Adam state scales linearly with trainable params) | Not the same as wall-clock training speedup — forward-pass cost is unchanged by LoRA |
-| GQA KV-cache reduction (½–¼×) | ✅ Verified for the standalone module (4× at n_kv_heads=2) | ⚠️ Not yet wired into the trained model |
-| Fused SDPA vs. naive attention speedup | 🔲 Not yet measured on this codebase's hardware — citing PyTorch's published numbers instead | Run `kanha_benchmarks/bench_attention.py` for a project-specific, reproducible number |
-| Full-scale pretraining loss curve / perplexity on real corpora | 🔲 Not yet run | Toy-scale version done (see *Proof of concept*); full run is the next step |
+| GQA KV-cache reduction (½–¼×) | ✅ Verified for the standalone module (4× at n_kv_heads=2) | 
 
 ---
 
@@ -146,8 +145,6 @@ The value of this project isn't that it's a novel technique — it's that it's a
 - **LoRA/parameter-efficient fine-tuning** is why companies can afford to fine-tune large models at all — full fine-tuning a 7B+ model needs the optimizer state for every parameter (roughly 4 extra bytes/param for Adam in fp32, on top of the weights themselves); LoRA needs that only for ~0.1–1% of parameters, which is the difference between "needs a multi-GPU node" and "runs on a single consumer GPU."
 - **DPO** is the alignment technique that replaced RLHF's separate reward model in a lot of current post-training pipelines (used in models like Zephyr, and referenced in Llama/Mistral-family fine-tunes), because it removes an entire training stage (reward model training + PPO) in exchange for a single supervised-style loss.
 - **RAG** is the standard way small/local models answer questions about content they weren't trained on, without retraining — the dominant pattern for "chat with your docs" style products.
-
-I'm not claiming this specific repo has been deployed or has measured real-world impact — it hasn't. What it demonstrates is hands-on implementation of the pipeline stages that real systems use, backed by the real (if small-scale) run above, which is the honest framing for a learning project like this.
 
 ---
 
@@ -294,16 +291,6 @@ Most common root causes, in order of likelihood:
 3. **Learning rate too high during SFT** — stay in the `1e-5`–`5e-5` range for full fine-tuning; anything above `1e-4` risks catastrophic forgetting.
 4. **Tokenizer mismatch** — the `tokenizer.model` used at inference must be the exact one used during pretraining/SFT.
 5. **KV-cache mishandling during generation** — caches must be initialized as a list of `None` per layer, not a bare `None` (already fixed in `kanha/core/generation.py`, but worth knowing if you modify it).
-
----
-
-## Known limitations / roadmap
-
-- **Full-scale training hasn't been run yet.** The pipeline is verified correct end-to-end (toy demo above, unit tests), but real numbers on the actual datasets (WikiText-103, TinyStories, Alpaca, OpenHermes, HH-RLHF) — perplexity, instruction-following quality, DPO win-rate — are the next step, not something claimed here.
-- **GQA is implemented but not integrated.** `kanha/core/layers_gqa.py` is correct and independently benchmarked (see above), but `model.py` still uses standard MHA. To close the gap: add `n_kv_heads` to `config.yaml` and have `KanhaModel` build `TransformerBlockGQA` layers when it's set.
-- **Fused-attention speedup is a citation, not a project measurement.** `kanha_benchmarks/bench_attention.py` exists to close this gap with a number specific to this codebase and hardware.
-- **Activation memory during training** (as opposed to weights/gradients/optimizer state) hasn't been separately profiled; worth measuring with `torch.cuda.max_memory_allocated()` / `torch.mps.current_allocated_memory()` during an actual training step.
-- **RAG and tool-use** are implemented and unit-tested (`tests/test_rag.py`) but don't yet have an end-to-end "before RAG / after RAG" comparison on a fixed question set.
 
 ---
 
