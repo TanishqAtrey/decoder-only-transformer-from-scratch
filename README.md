@@ -116,7 +116,6 @@ max_seq_len: 512
 
 ## Efficiency — real, computed numbers
 
-These are derived directly from the code/config, not measured benchmarks — shown as such:
 
 - **LoRA parameter efficiency (computed):** with the default full-scale config (42M params, 8 layers) and LoRA rank=8 targeting `q_proj`+`v_proj` (`kanha/core/lora.py`), only **131,072 of 41,755,136 parameters are trainable — 0.31%, i.e. ~319× fewer parameters updated than full fine-tuning.** This is the actual reason LoRA fine-tuning is cheap: far less optimizer state (Adam moment buffers) and far less gradient memory, on top of fewer FLOPs.
 - **KV-cache size (computed):** standard MHA at `seq_len=512, batch=1, fp32` needs **16.78 MB** of KV cache across all 8 layers. If the GQA module above were wired in with `n_kv_heads=2`, the same cache would be **4.19 MB — 4× smaller**, matching the ½–¼× range GQA is designed for.
@@ -126,7 +125,6 @@ These are derived directly from the code/config, not measured benchmarks — sho
 
 ## Efficiency claims — status
 
-Being explicit about what's confirmed vs. still to be measured, rather than blending them into one set of numbers:
 
 | Claim | Status | Notes |
 |---|---|---|
